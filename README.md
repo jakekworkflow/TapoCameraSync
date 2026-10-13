@@ -91,7 +91,35 @@ venv/bin/python camera_sync.py
 | `--once` | Sync each camera that answers, then exit. |
 | `--env-file PATH` | Config file to read (default: `.env` next to the script). |
 | `--output DIR` | Output folder, overrides `TAPO_OUTPUT`. |
+| `--no-web` | Don't start the web viewer. |
 | `-v` | Debug logging. |
+
+## Web viewer
+
+`web.py` is a small read-only web page for the saved files. It lists each
+camera, then that camera's events grouped by day, and plays the matching clip
+when you click an event. Clips with no matching event are listed as
+"Recording". It only reads `camera_data/` and never contacts the cameras. It
+uses only the Python standard library.
+
+| Variable | Description |
+| --- | --- |
+| `TAPO_WEB_PORT` | Port to listen on (default `8080`). |
+| `TAPO_WEB_HOST` | Address to listen on (default `0.0.0.0`). |
+| `TAPO_WEB_USER` | Username for the page (default `admin`). |
+| `TAPO_WEB_PASSWORD` | Password for the page. Leave it empty to turn the login off. |
+
+`camera_sync.py` starts the viewer automatically, at `http://<host>:8080`.
+Pass `--no-web` to turn it off. The viewer isn't started with `--once`. If the
+port is already in use, an error is logged and syncing carries on without the
+viewer. To run only the viewer:
+
+```sh
+venv/bin/python web.py
+```
+
+Browsers can only play `.mp4` clips. `.ts` clips (saved when ffmpeg is
+missing) are listed but must be opened in VLC.
 
 ## How it decides when to sync
 

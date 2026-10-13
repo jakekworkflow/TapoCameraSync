@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tapo Cameras</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --line: #e2e4e9;
+    --text: #1d2127;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-soft: #e8efff;
+    --motion: #b45309;
+    --person: #047857;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111316;
+      --panel: #1a1d22;
+      --line: #2a2e35;
+      --text: #e6e8eb;
+      --muted: #8b929c;
+      --accent: #6b9bff;
+      --accent-soft: #1f2a40;
+      --motion: #f0a24b;
+      --person: #4cc79a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { margin: 0; font-size: 17px; }
+  header .muted { font-size: 13px; }
+  .muted { color: var(--muted); }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    min-height: calc(100vh - 52px);
+  }
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+
+  /* camera list */
+  nav {
+    border-right: 1px solid var(--line);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .camera {
+    text-align: left;
+    width: 100%;
+    font: inherit;
+    color: inherit;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+  }
+  .camera:hover { border-color: var(--accent); }
+  .camera.active { border-color: var(--accent); background: var(--accent-soft); }
+  .camera .name { font-weight: 600; font-size: 15px; }
+  .camera .meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+  /* events + player */
+  main { padding: 16px 20px; min-width: 0; }
+  .player {
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .player video { display: block; width: 100%; max-height: 60vh; }
+  .now-playing { margin: 0 0 18px; font-size: 13px; }
+
+  .day { margin-bottom: 18px; }
+  .day h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin: 0 0 6px;
+  }
+  .events {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .event {
+    display: grid;
+    grid-template-columns: 90px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 9px 12px;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    background: none;
+    border: 0;
+    border-top: 1px solid var(--line);
+    cursor: pointer;
+  }
+  .event:first-child { border-top: 0; }
+  .event:hover:not(:disabled) { background: var(--accent-soft); }
+  .event.playing { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
+  .event:disabled { cursor: default; opacity: .6; }
+  .event .time { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .event .type { font-weight: 500; }
+  .event .type.motion { color: var(--motion); }
+  .event .type.person { color: var(--person); }
+  .event .status { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .empty { padding: 30px 0; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tapo Cameras</h1>
+  <span class="muted" id="summary"></span>
+</header>
+<div class="layout">
+  <nav id="cameras"><div class="empty">Loading…</div></nav>
+  <main>
+    <div class="player" id="player" hidden><video id="video" controls playsinline></video></div>
+    <p class="now-playing muted" id="now-playing" hidden></p>
+    <div id="events"></div>
+  </main>
+</div>
+
+<script>
+const camerasEl = document.getElementById("cameras");
+const eventsEl = document.getElementById("events");
+const playerEl = document.getElementById("player");
+const videoEl = document.getElementById("video");
+const nowPlayingEl = document.getElementById("now-playing");
+
+let cameras = [];
+let current = null;
+
+const timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
+const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+const shortFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "class") node.className = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value);
+  }
+  node.append(...children.filter(c => c != null));
+  return node;
+}
+
+function dayLabel(day) {
+  const date = new Date(+day.slice(0, 4), +day.slice(4, 6) - 1, +day.slice(6, 8));
+  return dayFmt.format(date);
+}
+
+async function getJSON(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(response.status + " " + response.statusText);
+  return response.json();
+}
+
+async function loadCameras() {
+  cameras = await getJSON("/api/cameras");
+  const total = cameras.reduce((n, c) => n + c.event_count, 0);
+  document.getElementById("summary").textContent =
+    `${cameras.length} camera${cameras.length === 1 ? "" : "s"} · ${total} events`;
+
+  camerasEl.replaceChildren();
+  if (!cameras.length) {
+    camerasEl.append(el("div", { class: "empty" }, "No cameras synced yet."));
+    return;
+  }
+  for (const cam of cameras) {
+    const meta = [cam.model, cam.battery != null ? `🔋 ${cam.battery}%` : null, `${cam.event_count} events`]
+      .filter(Boolean).join(" · ");
+    const synced = cam.synced_at ? "Synced " + shortFmt.format(new Date(cam.synced_at)) : "Never synced";
+    camerasEl.append(el("button", { class: "camera", "data-id": cam.id, onclick: () => selectCamera(cam.id) },
+      el("div", { class: "name" }, cam.name),
+      el("div", { class: "meta" }, meta),
+      el("div", { class: "meta" }, synced),
+    ));
+  }
+  const fromHash = decodeURIComponent(location.hash.slice(1));
+  selectCamera(cameras.some(c => c.id === fromHash) ? fromHash : cameras[0].id);
+}
+
+async function selectCamera(id) {
+  current = id;
+  history.replaceState(null, "", "#" + encodeURIComponent(id));
+  for (const button of camerasEl.querySelectorAll(".camera")) {
+    button.classList.toggle("active", button.dataset.id === id);
+  }
+  stopVideo();
+  eventsEl.replaceChildren(el("div", { class: "empty" }, "Loading events…"));
+
+  const events = await getJSON(`/api/cameras/${encodeURIComponent(id)}/events`);
+  if (current !== id) return;  // another camera was picked while loading
+
+  eventsEl.replaceChildren();
+  if (!events.length) {
+    eventsEl.append(el("div", { class: "empty" }, "No events for this camera yet."));
+    return;
+  }
+  // events arrive newest first; group them by day
+  const byDay = new Map();
+  for (const event of events) {
+    if (!byDay.has(event.day)) byDay.set(event.day, []);
+    byDay.get(event.day).push(event);
+  }
+  for (const [day, dayEvents] of byDay) {
+    const list = el("div", { class: "events" });
+    for (const event of dayEvents) list.append(eventRow(event));
+    eventsEl.append(el("section", { class: "day" },
+      el("h2", {}, `${dayLabel(day)} · ${dayEvents.length}`),
+      list,
+    ));
+  }
+}
+
+function eventRow(event) {
+  let status;
+  if (!event.clip) status = "no clip yet";
+  else if (!event.playable) status = ".ts file, open in VLC";
+  else status = `${event.duration}s ▶`;
+
+  const row = el("button", { class: "event", onclick: () => play(event, row) },
+    el("span", { class: "time" }, timeFmt.format(new Date(event.start))),
+    el("span", { class: "type " + event.type.toLowerCase() }, event.type),
+    el("span", { class: "status" }, status),
+  );
+  row.disabled = !event.playable;
+  return row;
+}
+
+function play(event, row) {
+  for (const r of eventsEl.querySelectorAll(".event.playing")) r.classList.remove("playing");
+  row.classList.add("playing");
+  playerEl.hidden = false;
+  nowPlayingEl.hidden = false;
+  const cam = cameras.find(c => c.id === current);
+  nowPlayingEl.textContent =
+    `${cam ? cam.name : current} · ${event.type} · ${dayLabel(event.day)} ${timeFmt.format(new Date(event.start))}`;
+  videoEl.src = event.clip;
+  videoEl.play().catch(() => {});
+  playerEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function stopVideo() {
+  videoEl.pause();
+  videoEl.removeAttribute("src");
+  videoEl.load();
+  playerEl.hidden = true;
+  nowPlayingEl.hidden = true;
+}
+
+loadCameras().catch(err => {
+  camerasEl.replaceChildren(el("div", { class: "empty" }, "Could not load cameras: " + err.message));
+});
+</script>
+</body>
+</html>

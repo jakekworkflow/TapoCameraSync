@@ -23,6 +23,7 @@ this script (variables already set in the environment win):
     TAPO_CAMERA_<NAME>_USER / _PASSWORD / _CLOUD_PASSWORD   optional per-camera login
 
 A single TAPO_HOST is also accepted when no TAPO_CAMERA_* entries exist.
+The web viewer from web.py is started too (port TAPO_WEB_PORT, off with --no-web).
 Each camera is watched in its own thread, so a long download on one camera
 does not hold up the others.
 """
@@ -327,6 +328,7 @@ def main():
     parser.add_argument("--env-file", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
     parser.add_argument("--output", help="folder to save everything into (default: TAPO_OUTPUT or camera_data)")
     parser.add_argument("--once", action="store_true", help="sync each reachable camera once and exit")
+    parser.add_argument("--no-web", action="store_true", help="don't start the web viewer (web.py)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -347,6 +349,16 @@ def main():
     output_format = "mp4" if shutil.which("ffmpeg") and shutil.which("ffprobe") else "ts"
     if output_format == "ts":
         log.warning("ffmpeg/ffprobe not found on PATH, saving raw .ts files instead of .mp4")
+
+    # the viewer runs alongside the watchers; --once exits right away, so it is skipped then
+    if not args.once and not args.no_web:
+        import web  # imported here because web.py imports helpers from this module
+        try:
+            server = web.make_server(output)
+        except OSError as err:
+            log.error("Web viewer not started: %s", err)
+        else:
+            threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
 
     threads = []
     for camera in cameras:

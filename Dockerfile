@@ -10,7 +10,8 @@ RUN apt-get update \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY camera_sync.py .
+COPY camera_sync.py web.py .
+COPY web web
 
 ENV PYTHONUNBUFFERED=1 \
     TAPO_OUTPUT=/data
