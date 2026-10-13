@@ -1,0 +1,7 @@
+.env
+app.py
+.git
+venv/
+.venv/
+__pycache__/
+camera_data/

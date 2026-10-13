@@ -1,0 +1,10 @@
+# secrets
+.env
+app.py
+
+# local environment and output
+venv/
+.venv/
+__pycache__/
+*.pyc
+camera_data/

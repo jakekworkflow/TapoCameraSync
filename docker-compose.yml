@@ -1,0 +1,12 @@
+services:
+  camera-sync:
+    build: .
+    image: tapo-camera-sync
+    container_name: tapo-camera-sync
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # always write inside the mounted volume, whatever TAPO_OUTPUT says in .env
+      TAPO_OUTPUT: /data
+    volumes:
+      - ./camera_data:/data
