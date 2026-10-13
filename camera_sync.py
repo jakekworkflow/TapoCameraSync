@@ -21,6 +21,7 @@ this script (variables already set in the environment win):
     TAPO_OUTPUT                                     output folder (default camera_data)
     TAPO_CAMERA_<NAME>_HOST                         one line per camera, any <NAME>
     TAPO_CAMERA_<NAME>_USER / _PASSWORD / _CLOUD_PASSWORD   optional per-camera login
+    TAPO_RETENTION_DAYS                             delete days older than this (empty or 0: keep all)
 
 A single TAPO_HOST is also accepted when no TAPO_CAMERA_* entries exist.
 The web viewer from web.py is started too (port TAPO_WEB_PORT, off with --no-web).
@@ -40,7 +41,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pytapo import Tapo
 from pytapo.media_stream.downloader import Downloader
@@ -54,6 +55,8 @@ RETRY_INTERVAL_SECONDS = 60
 OFFLINE_AFTER_MISSES = 3
 # searchDetectionList returns at most 1000 events per call, so query in chunks
 EVENT_CHUNK_SECONDS = 60 * 60
+# how often old recordings are checked for deletion when TAPO_RETENTION_DAYS is set
+PRUNE_INTERVAL_SECONDS = 60 * 60
 
 
 def ping(host, timeout=2):
@@ -79,6 +82,47 @@ def read_json(path, default):
             return json.load(f)
     except (OSError, ValueError):
         return default
+
+
+def retention_cutoff(days):
+    """YYYYMMDD of the oldest day to keep, or None to keep everything."""
+    if not days:
+        return None
+    return (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+
+
+def prune_old_days(output, days):
+    """Delete each camera's recordings and events for days older than the retention period.
+
+    state.json keeps listing those days as complete, so they are not downloaded again.
+    """
+    cutoff = retention_cutoff(days)
+    if not cutoff:
+        return
+    try:
+        cameras = os.listdir(output)
+    except FileNotFoundError:
+        return
+    for camera in cameras:
+        rec_root = os.path.join(output, camera, "recordings")
+        events_root = os.path.join(output, camera, "events")
+        old = set()
+        for root, suffix in ((rec_root, ""), (events_root, ".json")):
+            try:
+                names = os.listdir(root)
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            for name in names:
+                day = name.removesuffix(suffix)
+                if name.endswith(suffix) and re.fullmatch(r"\d{8}", day) and day < cutoff:
+                    old.add(day)
+        for day in sorted(old):
+            shutil.rmtree(os.path.join(rec_root, day), ignore_errors=True)
+            try:
+                os.remove(os.path.join(events_root, day + ".json"))
+            except FileNotFoundError:
+                pass
+            log.info("[%s] Deleted %s, older than %d days", camera, day, days)
 
 
 def load_env_file(path):
@@ -139,11 +183,12 @@ def safe_name(name):
 
 
 class CameraSync:
-    def __init__(self, camera, output, output_format):
+    def __init__(self, camera, output, output_format, retention_days=0):
         self.camera = camera
         self.host = camera["host"]
         self.output = output
         self.output_format = output_format
+        self.retention_days = retention_days
         self.log = CameraLog(log, {"camera": camera["label"]})
 
     def connect(self):
@@ -210,9 +255,11 @@ class CameraSync:
         state = read_json(state_path, {"completed_days": []})
         completed = set(state["completed_days"])
         today = datetime.now().strftime("%Y%m%d")
+        cutoff = retention_cutoff(self.retention_days)
 
         for date in self.recording_dates(tapo):
-            if date in completed:
+            # days past the retention period would only be deleted again
+            if date in completed or (cutoff and date < cutoff):
                 continue
             self.log.info("Day %s", date)
             events_ok = self.save_events(tapo, root, date, time_correction)
@@ -346,6 +393,12 @@ def main():
         parser.error("no password for: " + ", ".join(missing) + " (set TAPO_PASSWORD)")
 
     output = args.output or os.environ.get("TAPO_OUTPUT") or "camera_data"
+    try:
+        retention_days = int(os.environ.get("TAPO_RETENTION_DAYS") or 0)
+    except ValueError:
+        parser.error("TAPO_RETENTION_DAYS must be a whole number of days")
+    if retention_days < 0:
+        parser.error("TAPO_RETENTION_DAYS can't be negative")
     output_format = "mp4" if shutil.which("ffmpeg") and shutil.which("ffprobe") else "ts"
     if output_format == "ts":
         log.warning("ffmpeg/ffprobe not found on PATH, saving raw .ts files instead of .mp4")
@@ -362,13 +415,19 @@ def main():
 
     threads = []
     for camera in cameras:
-        syncer = CameraSync(camera, output, output_format)
+        syncer = CameraSync(camera, output, output_format, retention_days)
         thread = threading.Thread(target=syncer.watch, args=(args.once,), name=camera["label"], daemon=True)
         thread.start()
         threads.append(thread)
     log.info("Watching %d camera(s): %s", len(cameras), ", ".join(c["label"] for c in cameras))
+    if retention_days:
+        log.info("Keeping %d days of recordings", retention_days)
+    next_prune = 0.0
     # join with a timeout so Ctrl+C still reaches the main thread
     while any(t.is_alive() for t in threads):
+        if retention_days and time.monotonic() >= next_prune:
+            next_prune = time.monotonic() + PRUNE_INTERVAL_SECONDS
+            prune_old_days(output, retention_days)
         for thread in threads:
             thread.join(1)
 

@@ -50,6 +50,7 @@ is always checked again because the camera is still recording.
 | `TAPO_CAMERA_<NAME>_USER`, `_PASSWORD`, `_CLOUD_PASSWORD` | Optional login for one camera. |
 | `TAPO_OUTPUT` | Output folder (default `camera_data`). Ignored in Docker, which uses `/data`. |
 | `TZ` | Time zone for file names, e.g. `America/New_York`. Mainly needed in Docker. |
+| `TAPO_RETENTION_DAYS` | Delete recordings and events older than this many days. Empty or `0` keeps everything. |
 
 Example with two cameras, one of which has its own password:
 
@@ -132,6 +133,9 @@ missing) are listed but must be opened in VLC.
   (`OFFLINE_AFTER_MISSES`), so one dropped ping doesn't trigger another sync.
   The next time it wakes, it syncs again.
 - If a camera has no SD card, only its info is saved.
+- With `TAPO_RETENTION_DAYS` set, days older than that are deleted (the day's
+  clips and its events file) at startup and then every hour. Those days are not
+  downloaded again, even if they are still on the SD card.
 
 ## Notes
 
