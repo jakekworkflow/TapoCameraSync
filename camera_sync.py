@@ -55,6 +55,10 @@ RETRY_INTERVAL_SECONDS = 60
 OFFLINE_AFTER_MISSES = 3
 # searchDetectionList returns at most 1000 events per call, so query in chunks
 EVENT_CHUNK_SECONDS = 60 * 60
+# clips on disk starting within this many seconds of a clip on the camera count as that clip
+# (older versions named clips from a time correction that drifts by a second between syncs)
+SAME_CLIP_SECONDS = 2
+CLIP_NAME_RE = re.compile(r"(\d{8}_\d{6})-\d{6}\.(?:mp4|ts)")
 # how often old recordings are checked for deletion when TAPO_RETENTION_DAYS is set
 PRUNE_INTERVAL_SECONDS = 60 * 60
 
@@ -340,12 +344,22 @@ class CameraSync:
         clips.sort()
         self.log.info("  %d recordings", len(clips))
 
+        # start times of clips already on disk, so a clip saved under a slightly
+        # different name is not downloaded again
+        on_disk = []
+        for existing in os.listdir(day_dir):
+            match = CLIP_NAME_RE.fullmatch(existing)
+            if match:
+                on_disk.append(datetime.strptime(match.group(1), "%Y%m%d_%H%M%S").timestamp())
+
         ok = True
         for i, (start, end) in enumerate(clips, 1):
-            local_start = datetime.fromtimestamp(start + time_correction)
-            local_end = datetime.fromtimestamp(end + time_correction)
+            # named from the camera's own clock, like the events: time_correction is
+            # re-measured on every connection and drifts by a second, which renamed clips
+            local_start = datetime.fromtimestamp(start)
+            local_end = datetime.fromtimestamp(end)
             file_name = "{:%Y%m%d_%H%M%S}-{:%H%M%S}.{}".format(local_start, local_end, self.output_format)
-            if os.path.isfile(day_dir + file_name):
+            if any(abs(start - t) <= SAME_CLIP_SECONDS for t in on_disk):
                 continue
             self.log.info("  [%d/%d] %s", i, len(clips), file_name)
             downloader = Downloader(
@@ -367,6 +381,8 @@ class CameraSync:
             if action == "Recording in progress" or not os.path.isfile(day_dir + file_name):
                 ok = False
                 self.log.info("  %s not saved (%s)", file_name, action)
+            else:
+                on_disk.append(start)
         return ok
 
 

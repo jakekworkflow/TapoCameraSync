@@ -20,7 +20,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
@@ -43,6 +43,7 @@ ALARM_TYPES = {
     6: "Person",
 }
 
+CLIP_SLACK = timedelta(seconds=2)
 CONTENT_TYPES = {"mp4": "video/mp4", "ts": "video/mp2t"}
 CHUNK_SIZE = 256 * 1024
 
@@ -132,9 +133,10 @@ class Library:
                 except (KeyError, TypeError, ValueError):
                     continue
                 clip = None
-                # the clip that covers the event's start time (names are local time, second precision)
+                # the clip that covers the event's start time (names are local time, second
+                # precision, and clips from older versions can be off by a second)
                 for clip_start, clip_end, file_name in clips.get(day, []):
-                    if clip_start <= start <= clip_end:
+                    if clip_start - CLIP_SLACK <= start <= clip_end + CLIP_SLACK:
                         clip = file_name
                         used.add((day, file_name))
                         break
