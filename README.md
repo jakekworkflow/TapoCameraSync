@@ -11,6 +11,8 @@ sync runs.
 
 Built on [pytapo](https://github.com/JurajNyiri/pytapo).
 
+<img width="1234" height="1158" alt="Screenshot 2026-10-13 150744" src="https://github.com/user-attachments/assets/abbbb266-b816-4ac4-88c6-746da27ccdc1" />
+
 ## What gets saved
 
 ```
